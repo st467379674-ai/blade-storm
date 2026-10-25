@@ -1,5 +1,7 @@
 # 转刀风暴 · BLADE STORM
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/st467379674-ai/blade-storm)
+
 一款用 three.js 制作的 **3D 多人联机转刀竞技游戏**。核心循环参考转刀类游戏：刀刃自动环绕角色旋转，贴身碰撞扣血，击杀后变强、变大、增加刀刃，在毒圈收拢前活到最后。
 
 ![开始界面](docs/preview-start.png)
