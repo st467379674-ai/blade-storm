@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#05090c" />
+    <meta name="description" content="转刀风暴 — 3D 多人联机飞刀竞技场。刀刃自动环绕，猎杀对手，在毒雾中活到最后。" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <title>转刀风暴 · BLADE STORM</title>
+  </head>
+  <body>
+    <div id="app">
+      <div id="game-root" aria-label="3D 游戏场景"></div>
+      <div class="scene-grade" aria-hidden="true"></div>
+      <div class="vignette" aria-hidden="true"></div>
+      <div id="damage-flash" class="damage-flash" aria-hidden="true"></div>
+      <div id="poison-overlay" class="poison-overlay" aria-hidden="true"></div>
+
+      <div id="hud" class="hud">
+        <header class="hud-top">
+          <div class="hud-brand">
+            <span class="brand-seal">刃</span>
+            <div class="brand-type">
+              <b>BLADE STORM</b>
+              <small>夜刃擂台</small>
+            </div>
+            <span id="ping" class="ping">-- ms</span>
+          </div>
+
+          <div class="match-clock">
+            <span id="phase-label" class="phase-label">对决</span>
+            <strong id="timer">03:00</strong>
+            <div class="clock-rule"><i id="zone-progress"></i></div>
+          </div>
+
+          <div class="hud-utility">
+            <span class="live-pip"></span>
+            <span><b id="human-count">1</b> 名刀客</span>
+            <button id="mute-btn" class="icon-btn" type="button" aria-label="切换声音" title="切换声音">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path class="sound-wave" d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+        </header>
+
+        <aside class="radar-panel">
+          <canvas id="radar" width="320" height="320"></canvas>
+          <span class="radar-north">N</span>
+          <span class="radar-caption">夜刃擂台</span>
+        </aside>
+
+        <aside class="scoreboard panel">
+          <header>
+            <span>战况</span>
+            <small>击杀 / 淘汰</small>
+          </header>
+          <ol id="score-list"></ol>
+        </aside>
+
+        <div id="zone-banner" class="zone-banner">
+          <span class="zone-icon">!</span>
+          <span>毒雾正在收缩 · 进入安全区</span>
+        </div>
+
+        <div id="kill-feed" class="kill-feed" aria-live="polite"></div>
+        <div id="buff-row" class="buff-row"></div>
+
+        <div class="vitals panel">
+          <div class="vital-head">
+            <span id="self-name" class="self-name">刀客</span>
+            <span id="hp-text" class="hp-text">100 / 100</span>
+          </div>
+          <div class="health-track">
+            <div id="health-ghost" class="health-ghost"></div>
+            <div id="health-fill" class="health-fill"></div>
+            <div class="health-glint"></div>
+          </div>
+          <div class="soul-row">
+            <span class="soul-label"><i></i>刀魂</span>
+            <div class="soul-track"><b id="soul-fill"></b></div>
+            <strong id="soul-count">0 / 4</strong>
+          </div>
+          <div class="vital-foot">
+            <div class="dash-meter">
+              <span>瞬步</span>
+              <div class="dash-track"><i id="dash-fill"></i></div>
+              <kbd>SPACE</kbd>
+            </div>
+            <div class="power-meter">
+              <span id="power-label">双刃</span>
+              <div id="power-pips" class="power-pips"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="controls-hint">
+          <span><kbd>WASD</kbd> 移动</span>
+          <span><kbd>SPACE</kbd> 瞬步</span>
+          <span class="hint-muted">刀刃自动环绕 · 贴身猎杀</span>
+        </div>
+
+        <div id="respawn-card" class="respawn-card">
+          <span class="respawn-kicker">刀落</span>
+          <strong id="respawn-countdown">3.0</strong>
+          <p>重返战场</p>
+          <div class="respawn-rule"><i></i></div>
+        </div>
+
+        <div id="countdown-banner" class="countdown-banner">
+          <span>准备</span>
+          <strong id="countdown-number">3</strong>
+          <i></i>
+        </div>
+
+        <div id="toast" class="toast"></div>
+      </div>
+
+      <div id="touch-controls" class="touch-controls" aria-hidden="true">
+        <div id="joystick" class="joystick">
+          <div class="joystick-ring"></div>
+          <div id="joystick-knob" class="joystick-knob"></div>
+        </div>
+        <button id="dash-btn" class="dash-btn" type="button">
+          <span>瞬步</span>
+          <small>DASH</small>
+        </button>
+      </div>
+
+      <section id="start-screen" class="screen start-screen">
+        <div class="start-wash" aria-hidden="true"></div>
+        <div class="start-watermark" aria-hidden="true">斬</div>
+        <header class="landing-top">
+          <div class="landing-logo">
+            <span class="logo-blade">刃</span>
+            <div><b>BLADE STORM</b><small>转刀风暴</small></div>
+          </div>
+          <div class="landing-status">
+            <span class="status-dot"></span>
+            <span id="online-label">正在探测擂台</span>
+          </div>
+        </header>
+
+        <main class="landing-main">
+          <section class="landing-copy">
+            <p class="eyebrow"><span>WUXIA BLADE ARENA</span><i></i><b>NIGHTFALL · 01</b></p>
+            <div class="title-wrap">
+              <h1>转刀<span>风暴</span></h1>
+              <span class="title-cut" aria-hidden="true"></span>
+            </div>
+            <p class="landing-en">BLADE&nbsp;STORM</p>
+            <p class="landing-lede">刀不由手，随风成阵。<br />让环绕的刀刃替你说话。</p>
+
+            <form id="join-form" class="join-form" autocomplete="off">
+              <label for="nickname">刀客名号</label>
+              <div class="join-row">
+                <input id="nickname" name="nickname" maxlength="12" placeholder="无名刀客" autocomplete="off" spellcheck="false" />
+                <button id="join-btn" class="join-btn" type="submit">
+                  <span class="join-btn-text">踏入刀阵</span>
+                  <svg viewBox="0 0 28 12" aria-hidden="true"><path d="M0 6h24M19 1l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>
+                </button>
+              </div>
+              <p class="join-note desktop-note"><kbd>WASD</kbd> 移动 <span>·</span> <kbd>SPACE</kbd> 瞬步 <span>·</span> 刀刃自动旋杀</p>
+              <p class="join-note touch-note">左侧摇杆移动 <span>·</span> 右侧瞬步 <span>·</span> 刀刃自动旋杀</p>
+              <p id="join-error" class="join-error" role="alert"></p>
+            </form>
+          </section>
+
+          <aside class="landing-side">
+            <div class="side-rule"></div>
+            <article class="rule-card">
+              <span class="rule-no">01</span>
+              <div><h3>旋刀</h3><p>巨刃自动环绕。刀刃相撞时，高阶刀会击落低阶刀片。</p></div>
+            </article>
+            <article class="rule-card">
+              <span class="rule-no">02</span>
+              <div><h3>猎杀</h3><p>击杀刀傀积攒刀魂，每 4 魂长一刀，每 8 魂升一阶。</p></div>
+            </article>
+            <article class="rule-card">
+              <span class="rule-no">03</span>
+              <div><h3>夺刃</h3><p>青/蓝/紫锻分别对应不同强度。拾取锻刃与刀片，活到最后。</p></div>
+            </article>
+
+            <div class="arena-status-card">
+              <div class="arena-status-head">
+                <span class="status-dot"></span>
+                <span id="arena-status">决斗场待机</span>
+              </div>
+              <div class="arena-count">
+                <strong id="online-count">--</strong>
+                <span>名刀客<br />正在候场</span>
+              </div>
+              <p id="arena-meta">连接擂台以读取战况</p>
+            </div>
+          </aside>
+        </main>
+
+        <footer class="landing-foot">
+          <p>3D MULTIPLAYER <span>/</span> WEBSOCKET <span>/</span> AUTO-SPIN COMBAT</p>
+          <p class="friend-hint"><span>邀请</span> 把当前地址发给朋友，即可同场对决</p>
+        </footer>
+      </section>
+
+      <section id="end-screen" class="screen end-screen hidden">
+        <div class="result-card">
+          <p class="eyebrow"><span>ROUND COMPLETE</span><i></i><b>战报</b></p>
+          <p class="result-kicker">本场夺魁</p>
+          <h2 id="result-winner">无名</h2>
+          <p class="result-line"><strong id="result-kills">0</strong> 次击杀 <span>·</span> 刀刃已归鞘</p>
+          <ol id="result-scores" class="result-scores"></ol>
+          <div class="restart-line">
+            <span>下一场对决</span>
+            <strong id="restart-countdown">10</strong>
+            <span>秒后开始</span>
+          </div>
+        </div>
+      </section>
+
+      <section id="disconnect-screen" class="screen disconnect-screen hidden">
+        <div class="disconnect-card">
+          <span class="disconnect-seal">断</span>
+          <p class="eyebrow"><span>CONNECTION LOST</span></p>
+          <h2>与擂台失去联系</h2>
+          <p id="disconnect-reason">连接已断开，请重新进入刀阵。</p>
+          <button id="reconnect-btn" class="join-btn" type="button"><span>重新连接</span></button>
+        </div>
+      </section>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

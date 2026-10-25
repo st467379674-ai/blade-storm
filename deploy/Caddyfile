@@ -1,0 +1,6 @@
+# Replace blade.example.com with your domain.
+# Caddy obtains and renews TLS automatically and proxies WebSocket upgrades.
+blade.example.com {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:3000
+}

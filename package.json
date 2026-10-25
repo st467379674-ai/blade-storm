@@ -1,0 +1,21 @@
+{
+  "name": "blade-storm",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "转刀风暴 - 3D 多人联机飞刀竞技场",
+  "scripts": {
+    "dev": "node server/index.js",
+    "build": "node scripts/build.mjs",
+    "start": "node server/index.js --prod",
+    "test:net": "node scripts/smoke-test.mjs",
+    "test:logic": "node scripts/logic-test.mjs"
+  },
+  "dependencies": {
+    "three": "^0.180.0",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "vite": "^7.1.7"
+  }
+}

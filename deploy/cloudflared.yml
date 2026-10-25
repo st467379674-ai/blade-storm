@@ -1,0 +1,12 @@
+# Named Cloudflare Tunnel configuration.
+# 1) cloudflared tunnel login
+# 2) cloudflared tunnel create blade-storm
+# 3) cloudflared tunnel route dns blade-storm blade.example.com
+# 4) copy this file to /etc/cloudflared/config.yml and edit the id/path.
+tunnel: REPLACE_WITH_TUNNEL_ID
+credentials-file: /etc/cloudflared/REPLACE_WITH_TUNNEL_ID.json
+
+ingress:
+  - hostname: blade.example.com
+    service: http://127.0.0.1:3000
+  - service: http_status:404
