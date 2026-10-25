@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: blade-storm
+    name: blade-storm-sg
     runtime: node
     plan: free
     region: singapore
