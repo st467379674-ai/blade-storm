@@ -3,6 +3,7 @@ services:
     name: blade-storm
     runtime: node
     plan: free
+    region: singapore
     buildCommand: npm ci && npm run build
     startCommand: node server/index.js --prod
     healthCheckPath: /api/status
