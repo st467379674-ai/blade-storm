@@ -9,11 +9,22 @@ const startScreen = $('start-screen');
 const endScreen = $('end-screen');
 const disconnectScreen = $('disconnect-screen');
 const hud = $('hud');
+const lobbyScreen = $('lobby-screen');
 const joinForm = $('join-form');
 const nicknameInput = $('nickname');
-const joinBtn = $('join-btn');
-const joinBtnText = joinBtn.querySelector('.join-btn-text');
+const createRoomBtn = $('create-room-btn');
+const joinRoomBtn = $('join-room-btn');
+const roomCodeInput = $('room-code-input');
+const joinBtnText = createRoomBtn.querySelector('.join-btn-text');
 const joinError = $('join-error');
+const lobbyCode = $('lobby-code');
+const lobbyCount = $('lobby-count');
+const lobbyList = $('lobby-list');
+const lobbyStatus = $('lobby-status');
+const lobbyHint = $('lobby-hint');
+const startRoundBtn = $('start-round-btn');
+const copyRoomBtn = $('copy-room-btn');
+const leaveRoomBtn = $('leave-room-btn');
 const onlineLabel = $('online-label');
 const onlineCount = $('online-count');
 const arenaStatus = $('arena-status');
@@ -66,13 +77,16 @@ try {
 } catch (error) {
   console.error(error);
   joinError.textContent = '当前浏览器无法创建 3D 场景，请开启 WebGL 后重试。';
-  joinBtn.disabled = true;
+  createRoomBtn.disabled = true;
+  joinRoomBtn.disabled = true;
 }
 
 let net = null;
 let selfId = null;
 let joined = false;
 let joining = false;
+let inMatch = false;
+let roomInfo = null;
 let latest = null;
 let serverConfig = {
   matchDuration: 180,
@@ -100,6 +114,19 @@ try {
   nicknameInput.value = saved || `刀客${Math.floor(100 + Math.random() * 900)}`;
 } catch {
   nicknameInput.value = `刀客${Math.floor(100 + Math.random() * 900)}`;
+}
+
+function normalizeRoomCode(raw) {
+  return String(raw ?? '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '')
+    .slice(0, 6);
+}
+
+const initialRoom = normalizeRoomCode(new URLSearchParams(location.search).get('room'));
+if (initialRoom) {
+  roomCodeInput.value = initialRoom;
+  roomCodeInput.focus();
 }
 
 for (let i = 0; i < MAX_BLADES; i++) {
@@ -135,10 +162,10 @@ async function refreshStatus() {
       playing: '台上激战',
       ended: '本场结算',
     }[data.phase] ?? '夜色沉沉';
-    onlineLabel.textContent = data.online > 0 ? `${data.online} 名刀客在线` : '擂台待机 · 可单人挑战';
+    onlineLabel.textContent = data.online > 0 ? `${data.online} 名刀客在线` : '擂台待机 · 可创建刀阵';
     onlineCount.textContent = data.online;
     arenaStatus.textContent = phaseText;
-    arenaMeta.textContent = `${data.bots} 名陪练就位 · 最多 ${serverConfig.maxHumans} 人同场`;
+    arenaMeta.textContent = `${data.rooms ?? 0} 个刀阵开放 · 每房最多 ${serverConfig.maxHumans} 人`;
     document.querySelectorAll('.status-dot').forEach((dot) => dot.classList.remove('offline'));
   } catch {
     onlineLabel.textContent = '擂台信号中断';
@@ -149,14 +176,28 @@ async function refreshStatus() {
   }
 }
 
-function setJoinLoading(loading, text = '踏入刀阵') {
-  joinBtn.disabled = loading;
-  joinBtnText.textContent = loading ? '正在入场' : text;
+function primaryLabel() {
+  return normalizeRoomCode(roomCodeInput.value).length === 6 ? '加入此刀阵' : '创建刀阵';
 }
 
-function startJoin(event) {
-  event?.preventDefault();
+function updatePrimaryLabel() {
+  if (!joining) joinBtnText.textContent = primaryLabel();
+}
+
+function setJoinLoading(loading) {
+  createRoomBtn.disabled = loading;
+  joinRoomBtn.disabled = loading;
+  joinBtnText.textContent = loading ? '正在连接' : primaryLabel();
+}
+
+function connectToRoom(mode) {
   if (joining || joined || !game) return;
+  const code = normalizeRoomCode(roomCodeInput.value);
+  if (mode === 'join' && code.length !== 6) {
+    joinError.textContent = '请输入 6 位房间码';
+    roomCodeInput.focus();
+    return;
+  }
   joining = true;
   sound.ensure();
   sound.ui();
@@ -175,16 +216,19 @@ function startJoin(event) {
     connectionTimer = null;
     joining = false;
     joined = true;
+    inMatch = false;
     selfId = msg.id;
+    roomInfo = msg.room ?? msg.snapshot?.room ?? null;
     serverConfig = { ...serverConfig, ...(msg.config ?? {}) };
     latest = msg.snapshot;
     game.setLocalId(selfId);
     game.setState(latest);
     game.handleEvents(msg.events ?? []);
-    enterMatch();
+    syncPhaseScreens();
   };
   net.onState = (snapshot) => {
     latest = snapshot;
+    roomInfo = snapshot.room ?? roomInfo;
     game.setState(snapshot);
     game.handleEvents(snapshot.events ?? []);
     handleEvents(snapshot.events ?? []);
@@ -210,16 +254,17 @@ function startJoin(event) {
     connectionTimer = null;
     if (joined && !manual) {
       joined = false;
+      inMatch = false;
       input.setEnabled(false);
       input.setTouchActive(false);
-      showDisconnect('与擂台的连接已断开。');
+      showDisconnect('与刀阵的连接已断开。');
     } else if (!joined) {
       joining = false;
       setJoinLoading(false);
-      if (!joinError.textContent) joinError.textContent = '未能进入擂台，请稍后重试';
+      if (!joinError.textContent) joinError.textContent = '未能进入刀阵，请稍后重试';
     }
   };
-  net.connect(name);
+  net.connect(name, mode, code);
 
   connectionTimer = setTimeout(() => {
     if (joined) return;
@@ -230,19 +275,83 @@ function startJoin(event) {
   }, 9000);
 }
 
+function renderLobby() {
+  if (!latest || !roomInfo) return;
+  const players = latest.players ?? [];
+  const humans = players.filter((p) => !p.isBot);
+  const isHost = roomInfo.hostId === selfId;
+  const waiting = latest.match.phase === 'waiting';
+  lobbyCode.textContent = roomInfo.code;
+  lobbyCount.textContent = `${humans.length} / ${roomInfo.maxHumans}`;
+  lobbyStatus.textContent = isHost
+    ? '你是房主 · 可以开始对局'
+    : '等待房主开始对局';
+  lobbyHint.textContent = isHost
+    ? '人齐后点“开始对局”，全员同时入场。'
+    : '房主开始后会自动入场，先去磨一磨刀。';
+  startRoundBtn.classList.toggle('hidden', !isHost);
+  startRoundBtn.disabled = !waiting;
+  startRoundBtn.querySelector('span').textContent = waiting ? '开始对局' : '对局进行中';
+
+  lobbyList.innerHTML = '';
+  const ordered = [...humans, ...players.filter((p) => p.isBot)];
+  for (const p of ordered) {
+    const li = document.createElement('li');
+    li.className = `lobby-player${p.id === selfId ? ' self' : ''}`;
+    const dot = document.createElement('span');
+    dot.className = 'lobby-player-dot';
+    dot.style.background = p.color;
+    const name = document.createElement('span');
+    name.className = 'lobby-player-name';
+    name.textContent = p.name;
+    if (p.id === selfId) {
+      const you = document.createElement('em');
+      you.textContent = '你';
+      name.appendChild(you);
+    }
+    if (p.isBot) {
+      const ai = document.createElement('em');
+      ai.className = 'bot';
+      ai.textContent = 'AI';
+      name.appendChild(ai);
+    }
+    const meta = document.createElement('span');
+    meta.className = 'lobby-player-meta';
+    if (p.id === roomInfo.hostId) meta.textContent = '房主';
+    else if (p.isBot) meta.textContent = '陪练';
+    else meta.textContent = '刀客';
+    li.append(dot, name, meta);
+    lobbyList.appendChild(li);
+  }
+}
+
+function showLobby() {
+  if (!joined || !roomInfo) return;
+  inMatch = false;
+  lobbyScreen.classList.remove('hidden');
+  startScreen.classList.add('hidden');
+  endScreen.classList.add('hidden');
+  disconnectScreen.classList.add('hidden');
+  hud.classList.remove('visible');
+  document.body.classList.remove('in-match');
+  input.setEnabled(false);
+  input.setTouchActive(false);
+  endVisible = false;
+  renderLobby();
+}
+
 function enterMatch() {
-  if (!latest) return;
-  const self = selfPlayer();
-  if (self) selfName.textContent = self.name;
+  if (inMatch) return;
+  inMatch = true;
+  lobbyScreen.classList.add('hidden');
   startScreen.classList.add('leaving');
-  setTimeout(() => startScreen.classList.add('hidden'), 520);
+  startScreen.classList.add('hidden');
   hud.classList.add('visible');
   input.setEnabled(true);
   input.setTouchActive(true);
   document.body.classList.add('in-match');
   updateHud(true);
   drawRadar();
-  syncPhaseScreens();
   sound.join();
 }
 
@@ -420,16 +529,23 @@ function addSystemFeed(text) {
 function syncPhaseScreens() {
   if (!latest) return;
   const phase = latest.match.phase;
+  roomInfo = latest.room ?? roomInfo;
+  if (phase === 'waiting') {
+    showLobby();
+    return;
+  }
+  if (phase === 'starting' || phase === 'playing') {
+    enterMatch();
+    endScreen.classList.add('hidden');
+    endVisible = false;
+    respawnCard.classList.remove('show');
+    return;
+  }
   if (phase === 'ended') {
+    enterMatch();
     if (latest.match.result && !endVisible) {
       showResult({ ...latest.match.result, scores: latest.match.result.scores });
     }
-  } else {
-    endScreen.classList.add('hidden');
-    endVisible = false;
-  }
-  if (phase === 'starting' || phase === 'playing') {
-    respawnCard.classList.remove('show');
   }
 }
 
@@ -470,10 +586,8 @@ function showResult(event) {
 }
 
 function showDisconnect(reason) {
-  if (document.body.classList.contains('in-match')) {
-    disconnectReason.textContent = reason || '连接已断开，请重新进入刀阵。';
-    disconnectScreen.classList.remove('hidden');
-  }
+  disconnectReason.textContent = reason || '连接已断开，请重新进入刀阵。';
+  disconnectScreen.classList.remove('hidden');
   input.setTouchActive(false);
 }
 
@@ -762,7 +876,43 @@ function toggleMute() {
   if (!muted) sound.ui();
 }
 
-joinForm.addEventListener('submit', startJoin);
+createRoomBtn.addEventListener('click', () => {
+  connectToRoom(normalizeRoomCode(roomCodeInput.value).length === 6 ? 'join' : 'create');
+});
+joinRoomBtn.addEventListener('click', () => connectToRoom('join'));
+joinForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  connectToRoom(normalizeRoomCode(roomCodeInput.value).length === 6 ? 'join' : 'create');
+});
+roomCodeInput.addEventListener('input', () => {
+  const normalized = normalizeRoomCode(roomCodeInput.value);
+  if (roomCodeInput.value !== normalized) roomCodeInput.value = normalized;
+  updatePrimaryLabel();
+});
+updatePrimaryLabel();
+startRoundBtn.addEventListener('click', () => {
+  if (!net) return;
+  startRoundBtn.disabled = true;
+  startRoundBtn.querySelector('span').textContent = '正在开局';
+  net.send({ type: 'start' });
+});
+copyRoomBtn.addEventListener('click', async () => {
+  if (!roomInfo) return;
+  const link = `${location.origin}${location.pathname}?room=${roomInfo.code}`;
+  try {
+    await navigator.clipboard.writeText(link);
+    showToast('邀请链接已复制', 1600);
+  } catch {
+    window.prompt('复制这个邀请链接发给朋友：', link);
+  }
+});
+leaveRoomBtn.addEventListener('click', () => {
+  net?.send({ type: 'leave' });
+  net?.close();
+  setTimeout(() => {
+    location.href = location.pathname;
+  }, 120);
+});
 muteBtn.addEventListener('click', toggleMute);
 reconnectBtn.addEventListener('click', () => location.reload());
 window.addEventListener('keydown', (event) => {

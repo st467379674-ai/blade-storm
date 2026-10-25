@@ -27,12 +27,13 @@ async function waitForServer() {
   throw new Error('server did not boot');
 }
 
-function createClient(name) {
+function createClient(name, action = 'join', roomCode = '') {
   const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
   const client = {
     name,
     ws,
     id: null,
+    room: null,
     state: null,
     events: [],
     hits: [],
@@ -45,6 +46,7 @@ function createClient(name) {
     const msg = JSON.parse(raw.toString());
     if (msg.type === 'welcome') {
       client.id = msg.id;
+      client.room = msg.room;
       client.state = msg.snapshot;
     } else if (msg.type === 'state') {
       client.state = msg;
@@ -69,7 +71,13 @@ function createClient(name) {
       }
     }, 30);
   });
-  ws.on('open', () => client.send({ type: 'join', name }));
+  ws.on('open', () => {
+    client.send({
+      type: action,
+      name,
+      ...(action === 'join' && roomCode ? { roomCode } : {}),
+    });
+  });
   return client;
 }
 
@@ -104,13 +112,19 @@ try {
   const status = await waitForServer();
   console.log(`\n  smoke test · server ready (${status.arena})`);
 
-  const a = createClient('测试刀客甲');
-  const b = createClient('测试刀客乙');
-  clients.push(a, b);
-  await Promise.all([a.ready, b.ready]);
-  console.log(`  ✓ two clients joined: ${a.id}, ${b.id}`);
+  const a = createClient('测试刀客甲', 'create');
+  clients.push(a);
+  await a.ready;
+  if (!a.room?.code) fail('room was not created');
+  const b = createClient('测试刀客乙', 'join', a.room.code);
+  clients.push(b);
+  await b.ready;
+  console.log(`  ✓ two clients in room ${a.room.code}: ${a.id}, ${b.id}`);
 
   if (a.id === b.id) fail('duplicate player ids');
+  if (a.room.code !== b.room.code) fail('clients landed in different rooms');
+  if (a.room.hostId !== a.id) fail('room creator is not host');
+  a.send({ type: 'start' });
 
   const ids = new Set([a.id, b.id]);
   const deadline = Date.now() + 24000;

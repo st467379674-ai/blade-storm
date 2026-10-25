@@ -12,7 +12,7 @@ export class Net {
     this.onPing = null;
   }
 
-  connect(name) {
+  connect(name, mode = 'create', roomCode = '') {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const url = `${protocol}//${location.host}/ws`;
     this.ws = new WebSocket(url);
@@ -20,7 +20,13 @@ export class Net {
     this.closedByUser = false;
 
     this.ws.addEventListener('open', () => {
-      this.send({ type: 'join', name });
+      if (mode === 'join') {
+        this.send({ type: 'join', name, roomCode });
+      } else if (mode === 'quick') {
+        this.send({ type: 'join', name });
+      } else {
+        this.send({ type: 'create', name });
+      }
       this.pingTimer = window.setInterval(() => this.ping(), 3000);
       this.ping();
     });

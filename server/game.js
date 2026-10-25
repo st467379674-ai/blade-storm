@@ -161,6 +161,7 @@ export class Game {
     this.clashCooldowns = new Map();
     this.breakCooldowns = new Map();
     this.options = options;
+    this.manualStart = options.manualStart === true;
     this.mobCount = Math.max(0, options.mobCount ?? CONFIG.mobCount);
     this.spawnBots(options.botCount ?? CONFIG.botCount);
   }
@@ -241,7 +242,7 @@ export class Game {
     if (used.has(finalName)) finalName = `${finalName}·${this.humanSeq}`;
     const p = this.createPlayer({ id, name: finalName, isBot: false });
     this.emit('join', { playerId: id, name: finalName });
-    if (this.phase === 'waiting') {
+    if (!this.manualStart && this.phase === 'waiting') {
       this.startCountdown();
     } else if (this.phase === 'starting' || this.phase === 'playing') {
       this.spawnPickupNear('upgrade', p, 5);
@@ -1377,8 +1378,17 @@ export class Game {
         p.bladeAngle = (p.bladeAngle + p.bladeSpeed * dt) % TAU;
       }
       if (this.restartIn <= 0) {
-        if (this.humanCount() > 0) this.startCountdown();
-        else this.phase = 'waiting';
+        if (this.manualStart) {
+          this.phase = 'waiting';
+          this.result = null;
+          this.countdown = 0;
+          this.timeLeft = CONFIG.matchDuration;
+          this.safeRadius = CONFIG.arenaRadius;
+        } else if (this.humanCount() > 0) {
+          this.startCountdown();
+        } else {
+          this.phase = 'waiting';
+        }
       }
       return;
     }

@@ -153,11 +153,19 @@
               <label for="nickname">刀客名号</label>
               <div class="join-row">
                 <input id="nickname" name="nickname" maxlength="12" placeholder="无名刀客" autocomplete="off" spellcheck="false" />
-                <button id="join-btn" class="join-btn" type="submit">
-                  <span class="join-btn-text">踏入刀阵</span>
+                <button id="create-room-btn" class="join-btn" type="button">
+                  <span class="join-btn-text">创建刀阵</span>
                   <svg viewBox="0 0 28 12" aria-hidden="true"><path d="M0 6h24M19 1l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>
                 </button>
               </div>
+              <div class="room-divider"><span>或加入朋友的刀阵</span></div>
+              <div class="join-row room-join-row">
+                <input id="room-code-input" maxlength="6" placeholder="输入 6 位房间码" autocomplete="off" spellcheck="false" autocapitalize="characters" />
+                <button id="join-room-btn" class="join-btn secondary" type="button">
+                  <span>加入刀阵</span>
+                </button>
+              </div>
+              <p class="join-note">创建后把房间码或邀请链接发给朋友</p>
               <p class="join-note desktop-note"><kbd>WASD</kbd> 移动 <span>·</span> <kbd>SPACE</kbd> 瞬步 <span>·</span> 刀刃自动旋杀</p>
               <p class="join-note touch-note">左侧摇杆移动 <span>·</span> 右侧瞬步 <span>·</span> 刀刃自动旋杀</p>
               <p id="join-error" class="join-error" role="alert"></p>
@@ -195,8 +203,42 @@
 
         <footer class="landing-foot">
           <p>3D MULTIPLAYER <span>/</span> WEBSOCKET <span>/</span> AUTO-SPIN COMBAT</p>
-          <p class="friend-hint"><span>邀请</span> 把当前地址发给朋友，即可同场对决</p>
+          <p class="friend-hint"><span>邀请</span> 创建刀阵后，把房间码或链接发给朋友</p>
         </footer>
+      </section>
+
+      <section id="lobby-screen" class="screen lobby-screen hidden">
+        <div class="lobby-panel">
+          <header class="lobby-head">
+            <div class="lobby-title">
+              <p class="eyebrow"><span>PRIVATE BLADE ARENA</span><i></i><b>等待开局</b></p>
+              <h2>夜刃刀阵</h2>
+              <p id="lobby-status">等待房主开始对局</p>
+            </div>
+            <div class="room-code-panel">
+              <span>房间码</span>
+              <strong id="lobby-code">------</strong>
+              <button id="copy-room-btn" class="copy-room-btn" type="button">复制邀请链接</button>
+            </div>
+          </header>
+          <div class="lobby-grid">
+            <div class="lobby-roster">
+              <div class="lobby-roster-head"><span>在场刀客</span><b id="lobby-count">1 / 10</b></div>
+              <ul id="lobby-list" class="lobby-list"></ul>
+            </div>
+            <aside class="lobby-side">
+              <p class="lobby-kicker">房主开始后，所有刀客同时入场。<br />房间码只在本次刀阵有效。</p>
+              <div class="lobby-actions">
+                <button id="start-round-btn" class="join-btn hidden" type="button">
+                  <span>开始对局</span>
+                  <svg viewBox="0 0 28 12" aria-hidden="true"><path d="M0 6h24M19 1l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>
+                </button>
+                <button id="leave-room-btn" class="ghost-btn" type="button">离开房间</button>
+              </div>
+              <p id="lobby-hint" class="lobby-hint">等待房主开始对局</p>
+            </aside>
+          </div>
+        </div>
       </section>
 
       <section id="end-screen" class="screen end-screen hidden">
@@ -207,9 +249,9 @@
           <p class="result-line"><strong id="result-kills">0</strong> 次击杀 <span>·</span> 刀刃已归鞘</p>
           <ol id="result-scores" class="result-scores"></ol>
           <div class="restart-line">
-            <span>下一场对决</span>
+            <span>返回刀阵大厅</span>
             <strong id="restart-countdown">10</strong>
-            <span>秒后开始</span>
+            <span>秒</span>
           </div>
         </div>
       </section>

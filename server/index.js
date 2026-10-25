@@ -4,7 +4,8 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
-import { Game, CONFIG } from './game.js';
+import { CONFIG } from './game.js';
+import { RoomManager } from './rooms.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -35,10 +36,33 @@ const MIME = {
 
 const COMPRESSIBLE = new Set(['.html', '.js', '.css', '.json', '.svg', '.txt']);
 
-const game = new Game({ botCount: BOT_COUNT, mobCount: MOB_COUNT });
+const rooms = new RoomManager({ botCount: BOT_COUNT, mobCount: MOB_COUNT });
+const CLIENT_CONFIG = {
+  arenaRadius: CONFIG.arenaRadius,
+  matchDuration: CONFIG.matchDuration,
+  maxHumans: CONFIG.maxHumans,
+  maxBlades: CONFIG.maxBlades,
+  maxBladeLevel: CONFIG.maxBladeLevel,
+  zoneShrinkStart: CONFIG.zoneShrinkStart,
+  zoneShrinkDuration: CONFIG.zoneShrinkDuration,
+};
 
 function send(ws, payload) {
   if (ws.readyState === 1) ws.send(JSON.stringify(payload));
+}
+
+function sendWelcome(ws, room, player) {
+  ws.playerId = player.id;
+  ws.roomCode = room.code;
+  const snapshot = room.game.takeSnapshot();
+  snapshot.room = room.info();
+  send(ws, {
+    type: 'welcome',
+    id: player.id,
+    config: CLIENT_CONFIG,
+    room: room.info(),
+    snapshot,
+  });
 }
 
 function serveStatic(req, res) {
@@ -81,16 +105,19 @@ function serveStatic(req, res) {
 
 const server = http.createServer(async (req, res) => {
   if (req.url === '/api/status') {
+    const status = rooms.status();
     res.writeHead(200, {
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'no-store',
     });
     res.end(
       JSON.stringify({
-        online: game.humanCount(),
-        bots: game.botCount(),
-        phase: game.phase,
-        timeLeft: Math.ceil(game.timeLeft),
+        online: status.online,
+        bots: status.bots,
+        players: status.players,
+        rooms: status.rooms,
+        phase: status.phase,
+        timeLeft: Math.ceil(status.timeLeft),
         arena: '夜刃擂台',
       }),
     );
@@ -157,36 +184,45 @@ wss.on('connection', (ws) => {
       send(ws, { type: 'error', message: '消息格式错误' });
       return;
     }
-    if (msg.type === 'join') {
+    if (msg.type === 'create') {
       if (ws.playerId) return;
-      const player = game.addHuman(msg.name);
-      if (!player) {
-        send(ws, { type: 'error', message: '擂台已满，请稍后再试' });
+      const result = rooms.createRoom(msg.name, ws);
+      if (result.error) {
+        send(ws, { type: 'error', message: result.error });
         return;
       }
-      ws.playerId = player.id;
-      send(ws, {
-        type: 'welcome',
-        id: player.id,
-        config: {
-          arenaRadius: CONFIG.arenaRadius,
-          matchDuration: CONFIG.matchDuration,
-          maxHumans: CONFIG.maxHumans,
-          maxBlades: CONFIG.maxBlades,
-          maxBladeLevel: CONFIG.maxBladeLevel,
-          zoneShrinkStart: CONFIG.zoneShrinkStart,
-          zoneShrinkDuration: CONFIG.zoneShrinkDuration,
-        },
-        snapshot: game.takeSnapshot(),
-      });
+      sendWelcome(ws, result.room, result.player);
+      return;
+    }
+    if (msg.type === 'join') {
+      if (ws.playerId) return;
+      const result = msg.roomCode
+        ? rooms.joinRoom(msg.roomCode, msg.name, ws)
+        : rooms.quickJoin(msg.name, ws);
+      if (result.error) {
+        send(ws, { type: 'error', message: result.error });
+        return;
+      }
+      sendWelcome(ws, result.room, result.player);
       return;
     }
     if (!ws.playerId) {
-      send(ws, { type: 'error', message: '请先加入擂台' });
+      send(ws, { type: 'error', message: '请先创建或加入房间' });
+      return;
+    }
+    if (msg.type === 'start') {
+      const result = rooms.start(ws);
+      if (result.error) send(ws, { type: 'error', message: result.error });
       return;
     }
     if (msg.type === 'input') {
-      game.setInput(ws.playerId, msg);
+      const room = rooms.get(ws.roomCode);
+      if (room) room.game.setInput(ws.playerId, msg);
+      return;
+    }
+    if (msg.type === 'leave') {
+      rooms.leave(ws);
+      send(ws, { type: 'left' });
       return;
     }
     if (msg.type === 'ping') {
@@ -195,8 +231,7 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('close', () => {
-    if (ws.playerId) game.removeHuman(ws.playerId);
-    ws.playerId = null;
+    rooms.leave(ws);
   });
 });
 
@@ -225,19 +260,13 @@ function loop(now = performance.now()) {
   snapshotTimer += dt;
   let steps = 0;
   while (accumulator >= step && steps < 4) {
-    game.update(step);
+    rooms.tick(step);
     accumulator -= step;
     steps++;
   }
   if (snapshotTimer >= snapshotStep) {
     snapshotTimer = 0;
-    if (wss.clients.size > 0) {
-      const snapshot = game.takeSnapshot();
-      const payload = JSON.stringify({ type: 'state', ...snapshot });
-      for (const ws of wss.clients) {
-        if (ws.readyState === 1 && ws.playerId) ws.send(payload);
-      }
-    }
+    if (wss.clients.size > 0) rooms.broadcastSnapshots();
   }
   setTimeout(() => loop(performance.now()), 8);
 }
@@ -248,7 +277,7 @@ server.listen(PORT, HOST, () => {
   console.log(`\n  ⚔  转刀风暴 · BLADE STORM`);
   console.log(`      ${mode}  http://localhost:${PORT}`);
   console.log(`      联机 WebSocket: ws://localhost:${PORT}/ws`);
-  console.log(`      Bots: ${BOT_COUNT} · Knife spirits: ${MOB_COUNT} · Max humans: ${CONFIG.maxHumans}\n`);
+  console.log(`      Bots: ${BOT_COUNT} · Knife spirits: ${MOB_COUNT} · Max humans per room: ${CONFIG.maxHumans}\n`);
 });
 
 function shutdown() {
