@@ -562,12 +562,16 @@ export class Game {
     this.emit('hit', {
       x: round(victim.x),
       z: round(victim.z),
+      dirX: round(dx / d, 3),
+      dirZ: round(dz / d, 3),
       amount: round(remaining + absorbed),
       absorbed: round(absorbed),
       targetId: victim.id,
       attackerId: attacker?.id ?? null,
+      attackerLevel: attacker?.bladeLevel ?? 1,
       kind,
     });
+
     if (victim.hp <= 0) this.killPlayer(victim, attacker, sourceName);
     else victim.invuln = Math.max(victim.invuln, 0.08);
   }
@@ -596,9 +600,14 @@ export class Game {
         });
       }
     }
+    const killDx = attacker ? victim.x - attacker.x : 0;
+    const killDz = attacker ? victim.z - attacker.z : 0;
+    const killD = Math.hypot(killDx, killDz) || 1;
     this.emit('kill', {
       x: round(victim.x),
       z: round(victim.z),
+      dirX: round(killDx / killD, 3),
+      dirZ: round(killDz / killD, 3),
       killerId: attacker?.id ?? null,
       killerName: attacker?.name ?? sourceName,
       killerColor: attacker?.color ?? (sourceName === '刀傀' ? '#c084fc' : '#ff5c7a'),
@@ -866,9 +875,14 @@ export class Game {
               (attacker.buffs.rage > 0 ? 1.5 : 1);
             mob.hp -= damage;
             attacker.mobHitCd.set(mob.id, 0.3);
+            const mobDx = mob.x - attacker.x;
+            const mobDz = mob.z - attacker.z;
+            const mobD = Math.hypot(mobDx, mobDz) || 1;
             this.emit('mobHit', {
               x: round(mob.x),
               z: round(mob.z),
+              dirX: round(mobDx / mobD, 3),
+              dirZ: round(mobDz / mobD, 3),
               mobId: mob.id,
               playerId: attacker.id,
               damage: round(damage),
@@ -1137,6 +1151,8 @@ export class Game {
     this.emit('bladeBreak', {
       x: round(x),
       z: round(z),
+      dirX: round(dx / d, 3),
+      dirZ: round(dz / d, 3),
       attackerId: winner.id,
       attackerName: winner.name,
       attackerColor: winner.color,

@@ -96,13 +96,14 @@ export class Sound {
     source.stop(t + duration + 0.02);
   }
 
-  hit(strength = 1) {
+  hit(strength = 1, combo = 0) {
     if (!this.ctx) return;
     const now = performance.now();
     if (now - this.lastHit < 55) return;
     this.lastHit = now;
-    this.noise(0.09, 0.14 * strength, 'bandpass', 1500, 500);
-    this.tone(110, 0.12, 'triangle', 0.15 * strength, 55);
+    const pitch = Math.pow(2, Math.min(24, Math.max(0, combo)) / 24);
+    this.noise(0.09, 0.14 * strength, 'bandpass', 1500 * pitch, 500 * pitch);
+    this.tone(110 * pitch, 0.12, 'triangle', 0.15 * strength, 55 * pitch);
   }
 
   clash() {
@@ -118,10 +119,11 @@ export class Sound {
     this.tone(320, 0.3, 'triangle', 0.12, 140, 0.02);
   }
 
-  kill() {
+  kill(combo = 0) {
     if (!this.ctx) return;
-    this.tone(196, 0.45, 'triangle', 0.16, 98);
-    this.tone(587, 0.32, 'sine', 0.06, 440, 0.03);
+    const pitch = Math.pow(2, Math.min(24, Math.max(0, combo)) / 24);
+    this.tone(196 * pitch, 0.45, 'triangle', 0.16, 98 * pitch);
+    this.tone(587 * pitch, 0.32, 'sine', 0.06, 440 * pitch, 0.03);
     this.noise(0.28, 0.09, 'lowpass', 1200, 180, 0.02);
   }
 

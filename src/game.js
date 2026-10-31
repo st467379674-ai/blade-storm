@@ -537,7 +537,7 @@ function bakeFighter(fighter) {
   const root = new THREE.Group();
   root.add(mesh);
   if (scarf) root.add(scarf);
-  return { root, scarf };
+  return { root, scarf, material };
 }
 
 export class StormGame {
@@ -584,6 +584,7 @@ export class StormGame {
     this.localDashLock = 0;
     this.cameraLook = new THREE.Vector3(0, 1, 0);
     this.cameraShake = 0;
+    this.hitStop = 0;
     this.needsCameraSnap = true;
     this.elapsed = 0;
     this.fpsAvg = 60;
@@ -1609,6 +1610,23 @@ export class StormGame {
     bladeMesh.frustumCulled = false;
     bladeMesh.count = 0;
     group.add(bladeMesh);
+    const trailMat = new THREE.MeshBasicMaterial({
+      color: tierColor,
+      transparent: true,
+      opacity: 0.08,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const trailMesh = new THREE.InstancedMesh(
+      this.shared.bladeGeometry,
+      trailMat,
+      MAX_BLADES,
+    );
+    trailMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    trailMesh.frustumCulled = false;
+    trailMesh.count = 0;
+    group.add(trailMesh);
     const bladeDummy = new THREE.Object3D();
     const aura = new THREE.Sprite(
       new THREE.SpriteMaterial({
@@ -1708,8 +1726,15 @@ export class StormGame {
       bladeMesh,
       bladeDummy,
       bladeMat,
+      trailMesh,
+      trailMat,
+      bodyMat: bakedFighter.material,
       aura,
       scarf: bakedFighter.scarf,
+      flash: 0,
+      squash: 0,
+      knockX: 0,
+      knockZ: 0,
       tier: p.bladeLevel,
       shield,
       rageRing,
@@ -1737,6 +1762,9 @@ export class StormGame {
           x: mob.x,
           z: mob.z,
           phase: Math.random() * TAU,
+          hit: 0,
+          kickX: 0,
+          kickZ: 0,
           target: mob,
         };
         this.mobData.set(mob.id, data);
@@ -1886,30 +1914,53 @@ export class StormGame {
         const local = this.localSnapshot;
         const involved = e.targetId === this.localId || e.attackerId === this.localId;
         const nearby = local && Math.hypot(local.x - e.x, local.z - e.z) < 14;
+        const dirX = e.dirX ?? 0;
+        const dirZ = e.dirZ ?? 0;
+        this.applyHitReaction(e.targetId, dirX, dirZ, e.attackerLevel >= 4 ? 1.2 : 1);
         if (involved || nearby) {
-          this.spawnBurst(e.x, 0.9, e.z, e.absorbed > 0 ? 0x64d2ff : 0xff647f, 12, 4.2, 0.42);
-          this.spawnRing(e.x, e.z, e.absorbed > 0 ? 0x64d2ff : 0xff5c7a, 0.6, 1.5, 0.3);
+          this.spawnFlash(e.x, 1.05, e.z, e.absorbed > 0 ? 0x9fe7ff : 0xffffff, 1.8, 0.14);
+          this.spawnBurst(e.x, 0.9, e.z, e.absorbed > 0 ? 0x64d2ff : 0xff647f, 14, 4.8, 0.42, dirX, dirZ);
+          this.spawnRing(e.x, e.z, e.absorbed > 0 ? 0x64d2ff : 0xff5c7a, 0.6, 1.8, 0.3);
         }
         if (involved) {
-          this.spawnDamageNumber(e.x, e.z, `${e.absorbed > 0 && e.amount <= e.absorbed ? '挡' : `-${amount}`}`, e.absorbed > 0 ? '#8fe7ff' : '#ffd0d7');
+          const crit = amount >= 18 || e.attackerLevel >= 4;
+          this.spawnDamageNumber(
+            e.x,
+            e.z,
+            `${e.absorbed > 0 && e.amount <= e.absorbed ? '挡' : `-${amount}`}`,
+            e.absorbed > 0 ? '#8fe7ff' : crit ? '#ffd166' : '#ffd0d7',
+            { crit },
+          );
+          if (amount >= 18) this.hitStop = Math.max(this.hitStop, 0.028);
         }
         if (e.targetId === this.localId) {
-          this.cameraShake = Math.max(this.cameraShake, 0.32);
+          this.cameraShake = Math.max(this.cameraShake, 0.38 + Math.min(0.3, amount * 0.006));
           this.onLocalHit?.(e);
+        } else if (e.attackerId === this.localId) {
+          this.cameraShake = Math.max(this.cameraShake, 0.14);
         }
       } else if (e.type === 'clash') {
         const local = this.localSnapshot;
         if (local && Math.hypot(local.x - e.x, local.z - e.z) < 14) {
-          this.spawnBurst(e.x, 0.85, e.z, 0xffe0a3, 10, 5.2, 0.32);
-          this.spawnRing(e.x, e.z, 0xffd166, 0.2, 0.8, 0.25);
+          this.spawnFlash(e.x, 0.9, e.z, 0xffe6a8, 1.1, 0.1);
+          this.spawnBurst(e.x, 0.85, e.z, 0xffe0a3, 12, 5.6, 0.32);
+          this.spawnRing(e.x, e.z, 0xffd166, 0.2, 0.9, 0.25);
         }
       } else if (e.type === 'bladeBreak') {
         const localInvolved = e.attackerId === this.localId || e.victimId === this.localId;
-        this.spawnBurst(e.x, 1.1, e.z, e.attackerColor ?? 0xffd166, 26, 7.4, 0.72);
-        this.spawnBurst(e.x, 1.1, e.z, e.victimColor ?? 0xff5c7a, 18, 5.4, 0.58);
+        const dirX = e.dirX ?? 0;
+        const dirZ = e.dirZ ?? 0;
+        this.applyHitReaction(e.victimId, dirX, dirZ, 1.45);
+        this.spawnFlash(e.x, 1.15, e.z, 0xfff1c7, 2.8, 0.18);
+        this.spawnBurst(e.x, 1.1, e.z, e.attackerColor ?? 0xffd166, 30, 8.2, 0.72, dirX, dirZ);
+        this.spawnBurst(e.x, 1.1, e.z, e.victimColor ?? 0xff5c7a, 20, 6.0, 0.58, dirX, dirZ);
+        this.spawnRing(e.x, e.z, 0xffffff, 0.4, 5.2, 0.42);
         this.spawnRing(e.x, e.z, 0xffd166, 0.5, 4.6, 0.56);
         this.spawnRing(e.x, e.z, e.victimColor ?? 0xff5c7a, 0.8, 2.8, 0.4);
-        if (localInvolved) this.cameraShake = Math.max(this.cameraShake, 0.55);
+        if (localInvolved) {
+          this.cameraShake = Math.max(this.cameraShake, 0.72);
+          this.hitStop = Math.max(this.hitStop, 0.05);
+        }
       } else if (e.type === 'powerUp') {
         const view = this.views.get(e.playerId);
         if (view) {
@@ -1917,14 +1968,22 @@ export class StormGame {
           this.spawnBurst(view.x, 1.1, view.z, TIER_COLORS[(e.bladeLevel ?? 1) - 1] ?? 0x5eead4, 16, 5.2, 0.5);
         }
       } else if (e.type === 'kill') {
-        this.spawnBurst(e.x, 1, e.z, e.victimColor ?? 0xff5c7a, 28, 7.5, 0.8);
+        const dirX = e.dirX ?? 0;
+        const dirZ = e.dirZ ?? 0;
+        this.applyHitReaction(e.victimId, dirX, dirZ, 1.8);
+        this.spawnFlash(e.x, 1.2, e.z, 0xffffff, 3.6, 0.24);
+        this.spawnBurst(e.x, 1, e.z, e.victimColor ?? 0xff5c7a, 34, 8.5, 0.8, dirX, dirZ);
+        this.spawnBurst(e.x, 1, e.z, e.killerColor ?? 0x5eead4, 18, 6.5, 0.65, dirX, dirZ);
+        this.spawnRing(e.x, e.z, 0xffffff, 0.5, 6.2, 0.36);
         this.spawnRing(e.x, e.z, 0xff5c7a, 0.9, 4.2, 0.65);
         this.spawnRing(e.x, e.z, e.killerColor ?? 0x5eead4, 1.2, 3.4, 0.45);
         if (e.victimId === this.localId) {
-          this.cameraShake = Math.max(this.cameraShake, 0.9);
+          this.cameraShake = Math.max(this.cameraShake, 1.2);
+          this.hitStop = Math.max(this.hitStop, 0.075);
           this.onLocalDeath?.(e);
         } else if (e.killerId === this.localId) {
-          this.cameraShake = Math.max(this.cameraShake, 0.35);
+          this.cameraShake = Math.max(this.cameraShake, 0.72);
+          this.hitStop = Math.max(this.hitStop, 0.07);
           this.onLocalKill?.(e);
         }
       } else if (e.type === 'dash') {
@@ -1951,11 +2010,19 @@ export class StormGame {
       } else if (e.type === 'mobHit') {
         const local = this.localSnapshot;
         const nearby = local && Math.hypot(local.x - e.x, local.z - e.z) < 14;
+        const dirX = e.dirX ?? 0;
+        const dirZ = e.dirZ ?? 0;
+        this.reactMob(e.mobId, dirX, dirZ, 0.8);
         if (e.playerId === this.localId || nearby) {
-          this.spawnBurst(e.x, 0.75, e.z, 0xb06cff, 5, 2.8, 0.28);
+          this.spawnFlash(e.x, 0.9, e.z, 0xffffff, 1.0, 0.1);
+          this.spawnBurst(e.x, 0.75, e.z, 0xb06cff, 6, 3.2, 0.28, dirX, dirZ);
         }
         if (e.playerId === this.localId) {
-          this.spawnDamageNumber(e.x, e.z, `-${Math.max(1, Math.round(e.damage))}`, '#e0c8ff');
+          const dmg = Math.max(1, Math.round(e.damage));
+          this.spawnDamageNumber(e.x, e.z, `-${dmg}`, dmg >= 18 ? '#ffd166' : '#e0c8ff', {
+            crit: dmg >= 18,
+          });
+          this.cameraShake = Math.max(this.cameraShake, 0.05);
         }
       } else if (e.type === 'mobKill') {
         const local = this.localSnapshot;
@@ -1973,15 +2040,63 @@ export class StormGame {
     }
   }
 
-  spawnBurst(x, y, z, color, count = 12, speed = 4, life = 0.5) {
+  applyHitReaction(targetId, dirX = 0, dirZ = 0, strength = 1) {
+    const view = this.views.get(targetId);
+    if (!view) return;
+    const capped = Math.min(1.8, strength);
+    view.flash = Math.max(view.flash, 0.12 * capped);
+    view.squash = Math.max(view.squash, 0.16 * capped);
+    view.knockX = dirX * 0.3 * capped;
+    view.knockZ = dirZ * 0.3 * capped;
+  }
+
+  reactMob(mobId, dirX = 0, dirZ = 0, strength = 1) {
+    if (!mobId) return;
+    const data = this.mobData.get(mobId);
+    if (!data) return;
+    const capped = Math.min(1.8, strength);
+    data.hit = Math.max(data.hit ?? 0, 0.14 * capped);
+    data.kickX = dirX * 0.24 * capped;
+    data.kickZ = dirZ * 0.24 * capped;
+  }
+
+  spawnFlash(x, y, z, color, size = 1.5, life = 0.14) {
+    if (this.effects.length >= (this.lowQuality ? 30 : 100)) return;
+    const material = new THREE.SpriteMaterial({
+      map: this.shared.glowTexture,
+      color,
+      transparent: true,
+      opacity: 0.95,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const sprite = new THREE.Sprite(material);
+    sprite.position.set(x, y, z);
+    sprite.scale.setScalar(size * 0.45);
+    this.scene.add(sprite);
+    this.effects.push({
+      sprite,
+      type: 'flash',
+      life,
+      maxLife: life,
+      startScale: size * 0.45,
+      endScale: size * 1.8,
+    });
+  }
+
+  spawnBurst(x, y, z, color, count = 12, speed = 4, life = 0.5, dirX = 0, dirZ = 0) {
     if (this.effects.length >= (this.lowQuality ? 24 : 80)) return;
     const positions = new Float32Array(count * 3);
     const velocities = [];
+    const bias = Math.atan2(dirZ, dirX);
+    const directional = Math.hypot(dirX, dirZ) > 0.1;
     for (let i = 0; i < count; i++) {
       positions[i * 3] = x + (Math.random() - 0.5) * 0.3;
       positions[i * 3 + 1] = y + (Math.random() - 0.5) * 0.3;
       positions[i * 3 + 2] = z + (Math.random() - 0.5) * 0.3;
-      const a = Math.random() * TAU;
+      const a = directional && i < count * 0.6
+        ? bias + (Math.random() - 0.5) * 1.45
+        : Math.random() * TAU;
       const up = Math.random() * 0.9 + 0.15;
       const s = speed * (0.35 + Math.random() * 0.65);
       velocities.push(new THREE.Vector3(Math.cos(a) * s * 0.7, up * s * 0.55, Math.sin(a) * s * 0.7));
@@ -2028,17 +2143,32 @@ export class StormGame {
     });
   }
 
-  spawnDamageNumber(x, z, text, color) {
-    if (this.damageNumbers.length >= (this.lowQuality ? 10 : 24)) return;
+  spawnDamageNumber(x, z, text, color, options = {}) {
+    if (this.damageNumbers.length >= (this.lowQuality ? 10 : 28)) return;
+    const crit = options.crit === true;
+    const baseScale = (options.scale ?? 0.92) * (crit ? 1.28 : 1);
     const sprite = createTextSprite(text, color, {
       size: 128,
-      fontSize: text.length > 2 ? 52 : 66,
-      scale: 0.92,
-      weight: 700,
+      fontSize: text.length > 2 ? 52 : crit ? 76 : 66,
+      scale: 0.01,
+      weight: 800,
     });
-    sprite.position.set(x, 2.2, z);
+    const baseX = x + (Math.random() - 0.5) * 0.6;
+    const baseZ = z + (Math.random() - 0.5) * 0.3;
+    const baseY = 2.18 + Math.random() * 0.18;
+    sprite.position.set(baseX, baseY, baseZ);
     this.scene.add(sprite);
-    this.damageNumbers.push({ sprite, life: 0.9, maxLife: 0.9, vy: 1.25 });
+    this.damageNumbers.push({
+      sprite,
+      age: 0,
+      life: crit ? 1.05 : 0.88,
+      baseX,
+      baseZ,
+      baseY,
+      baseScale,
+      driftX: (Math.random() - 0.5) * 0.55,
+      crit,
+    });
   }
 
   updateLocal(dt) {
@@ -2108,11 +2238,29 @@ export class StormGame {
           view.angle = (view.angle + p.bladeSpeed * dt) % TAU;
         }
       }
-      view.group.position.set(view.x, 0, view.z);
+      view.knockX *= Math.exp(-9 * dt);
+      view.knockZ *= Math.exp(-9 * dt);
+      view.flash = Math.max(0, view.flash - dt);
+      view.squash = Math.max(0, view.squash - dt);
+      view.group.position.set(view.x + view.knockX, 0, view.z + view.knockZ);
       view.bodyRoot.rotation.y = view.facing;
       const moving = !view.dead && (Math.abs(p.x - view.x) > 0.02 || Math.abs(p.z - view.z) > 0.02);
       view.bodyRoot.position.y = view.dead ? 0 : Math.sin(this.elapsed * 7 + id.length) * 0.012 + (moving ? 0.015 : 0);
-      view.bodyRoot.scale.setScalar(p.scale);
+      const squashT = Math.min(1, view.squash / 0.16);
+      const bump = Math.sin(squashT * Math.PI * 0.5) * 0.18;
+      view.bodyRoot.scale.set(
+        p.scale * (1 + bump * 0.45),
+        p.scale * (1 - bump * 0.55),
+        p.scale * (1 + bump * 0.45),
+      );
+      const flashT = Math.min(1, view.flash / 0.12);
+      if (flashT > 0) {
+        view.bodyMat.emissive.setRGB(1, 1, 1);
+        view.bodyMat.emissiveIntensity = 0.35 + flashT * 3.2;
+      } else {
+        view.bodyMat.emissive.setHex(0x0d1816);
+        view.bodyMat.emissiveIntensity = 0.35;
+      }
       view.shadow.scale.setScalar(0.92 + p.scale * 0.12);
       view.ring.scale.setScalar(1.1 * p.scale);
       view.nameSprite.position.y = 2.64 + p.scale * 0.2;
@@ -2131,6 +2279,7 @@ export class StormGame {
         view.bladeMat.uniforms.uOuter.value.set(tierColor);
         view.orbitRing.material.color.set(tierColor);
         view.aura.material.color.set(tierColor);
+        view.trailMat.color.set(tierColor);
       }
 
       const bladeScale = p.bladeLength / BLADE_GEOM_LENGTH;
@@ -2152,6 +2301,27 @@ export class StormGame {
         view.bladeMesh.setMatrixAt(i, view.bladeDummy.matrix);
       }
       view.bladeMesh.instanceMatrix.needsUpdate = true;
+      const trailCount = this.lowQuality ? 0 : bladeCount;
+      view.trailMesh.count = trailCount;
+      view.trailMesh.visible = trailCount > 0;
+      for (let i = 0; i < trailCount; i++) {
+        const ring = i % 3;
+        const trailAngle = view.angle - 0.3 + (i / p.bladeCount) * TAU + (ring - 1) * 0.045;
+        const radius = p.bladeRadius + ring * 0.13;
+        view.bladeDummy.position.set(
+          Math.cos(trailAngle) * radius,
+          0.56 + ring * 0.025,
+          Math.sin(trailAngle) * radius,
+        );
+        view.bladeDummy.rotation.set(0, Math.PI - trailAngle, 0);
+        view.bladeDummy.scale.setScalar(bladeScale * 0.98);
+        view.bladeDummy.updateMatrix();
+        view.trailMesh.setMatrixAt(i, view.bladeDummy.matrix);
+      }
+      if (trailCount > 0) {
+        view.trailMesh.instanceMatrix.needsUpdate = true;
+        view.trailMat.opacity = p.buffs.rage > 0 ? 0.16 : 0.075;
+      }
       view.aura.visible = !view.dead;
       view.aura.material.opacity = p.buffs.rage > 0 ? 0.26 : 0.12;
       view.orbitRing.scale.set(p.bladeRadius + 0.26, p.bladeRadius + 0.26, 1);
@@ -2186,28 +2356,39 @@ export class StormGame {
       data.x = lerp(data.x, mob.x, damp(11, dt));
       data.z = lerp(data.z, mob.z, damp(11, dt));
       data.phase += dt;
+      data.hit = Math.max(0, (data.hit ?? 0) - dt);
+      data.kickX = (data.kickX ?? 0) * Math.exp(-12 * dt);
+      data.kickZ = (data.kickZ ?? 0) * Math.exp(-12 * dt);
       const bob = Math.sin(data.phase * 3.2) * 0.07;
+      const hitT = Math.min(1, data.hit / 0.14);
+      const hitBump = Math.sin(hitT * Math.PI * 0.5);
+      const x = data.x + data.kickX;
+      const z = data.z + data.kickZ;
 
-      dummy.position.set(data.x, 0.67 + bob, data.z);
+      dummy.position.set(x, 0.67 + bob, z);
       dummy.rotation.set(0, 0, 0);
-      dummy.scale.set(1.12, 1.08, 1.12);
+      dummy.scale.set(
+        1.12 * (1 + hitBump * 0.28),
+        1.08 * (1 - hitBump * 0.32),
+        1.12 * (1 + hitBump * 0.28),
+      );
       dummy.updateMatrix();
       this.mobBodyMesh.setMatrixAt(count, dummy.matrix);
 
       const angle = data.phase * 2.6;
       dummy.position.set(
-        data.x + Math.cos(angle) * 0.62,
+        x + Math.cos(angle) * 0.62,
         0.66 + bob,
-        data.z + Math.sin(angle) * 0.62,
+        z + Math.sin(angle) * 0.62,
       );
       dummy.rotation.set(0, Math.PI - angle, 0);
       dummy.scale.setScalar(0.2);
       dummy.updateMatrix();
       this.mobBladeMesh.setMatrixAt(count, dummy.matrix);
 
-      positions[count * 3] = data.x;
+      positions[count * 3] = x;
       positions[count * 3 + 1] = 0.95 + bob * 1.2;
-      positions[count * 3 + 2] = data.z;
+      positions[count * 3 + 2] = z;
 
       count++;
       if (count >= MAX_MOBS) break;
@@ -2336,6 +2517,9 @@ export class StormGame {
           this.scene.remove(e.points);
           e.points.geometry.dispose();
           e.points.material.dispose();
+        } else if (e.type === 'flash') {
+          this.scene.remove(e.sprite);
+          e.sprite.material.dispose();
         } else {
           this.scene.remove(e.mesh);
           e.mesh.geometry.dispose();
@@ -2357,6 +2541,10 @@ export class StormGame {
         }
         attr.needsUpdate = true;
         e.points.material.opacity = 1 - t;
+      } else if (e.type === 'flash') {
+        const scale = lerp(e.startScale, e.endScale, 1 - Math.pow(1 - t, 2));
+        e.sprite.scale.setScalar(scale);
+        e.sprite.material.opacity = (1 - t) * 0.95;
       } else {
         const radius = lerp(e.startRadius, e.endRadius, 1 - Math.pow(1 - t, 2));
         e.mesh.scale.setScalar(radius);
@@ -2366,19 +2554,27 @@ export class StormGame {
 
     for (let i = this.damageNumbers.length - 1; i >= 0; i--) {
       const d = this.damageNumbers[i];
-      d.life -= dt;
-      if (d.life <= 0) {
+      d.age += dt;
+      const t = Math.min(1, d.age / d.life);
+      if (t >= 1) {
         this.scene.remove(d.sprite);
         d.sprite.material.map?.dispose();
         d.sprite.material.dispose();
         this.damageNumbers.splice(i, 1);
         continue;
       }
-      const t = 1 - d.life / d.maxLife;
-      d.sprite.position.y += d.vy * dt;
-      d.sprite.material.opacity = 1 - t;
-      const s = 1.1 + t * 0.25;
-      d.sprite.scale.set(s, s, 1);
+      const pop = d.age < 0.15
+        ? 0.52 + 1.18 * Math.sin((d.age / 0.15) * Math.PI * 0.82)
+        : 1;
+      const rise = 1.35 * (1 - Math.pow(1 - Math.min(1, d.age / 0.62), 2.1));
+      const shake = d.crit ? Math.sin(d.age * 80) * 0.055 : 0;
+      d.sprite.position.x = d.baseX + d.driftX * d.age + shake;
+      d.sprite.position.z = d.baseZ;
+      d.sprite.position.y = d.baseY + rise;
+      const shrink = t > 0.68 ? 1 - (t - 0.68) * 0.9 : 1;
+      const scale = d.baseScale * pop * shrink;
+      d.sprite.scale.set(scale, scale, 1);
+      d.sprite.material.opacity = t < 0.62 ? 1 : 1 - (t - 0.62) / 0.38;
     }
   }
 
@@ -2435,6 +2631,11 @@ export class StormGame {
   }
 
   update(dt) {
+    const rawDt = dt;
+    if (this.hitStop > 0) {
+      this.hitStop = Math.max(0, this.hitStop - dt);
+      dt *= 0.16;
+    }
     this.elapsed += dt;
     this.updateLocal(dt);
     this.updateViews(dt);
@@ -2444,7 +2645,7 @@ export class StormGame {
     this.updateAmbient(dt);
     this.updateEffects(dt);
     this.updateCamera(dt, inDanger);
-    this.updateQuality(dt);
+    this.updateQuality(rawDt);
     this.sky.position.copy(this.camera.position);
     if (this.lowQuality) this.renderer.render(this.scene, this.camera);
     else this.composer.render();

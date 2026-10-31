@@ -53,6 +53,9 @@ const countdownBanner = $('countdown-banner');
 const countdownNumber = $('countdown-number');
 const zoneBanner = $('zone-banner');
 const killFeed = $('kill-feed');
+const comboMeter = $('combo-meter');
+const comboCountEl = $('combo-count');
+const comboFill = $('combo-fill');
 const toastEl = $('toast');
 const damageFlash = $('damage-flash');
 const poisonOverlay = $('poison-overlay');
@@ -108,6 +111,9 @@ let flashTimer = null;
 let toastTimer = null;
 let endVisible = false;
 let lastFrame = performance.now();
+let combo = 0;
+let comboTimer = 0;
+const COMBO_WINDOW = 2.3;
 
 try {
   const saved = localStorage.getItem('blade-storm-name');
@@ -328,6 +334,7 @@ function renderLobby() {
 function showLobby() {
   if (!joined || !roomInfo) return;
   inMatch = false;
+  resetCombo();
   lobbyScreen.classList.remove('hidden');
   startScreen.classList.add('hidden');
   endScreen.classList.add('hidden');
@@ -350,9 +357,36 @@ function enterMatch() {
   input.setEnabled(true);
   input.setTouchActive(true);
   document.body.classList.add('in-match');
+  resetCombo();
   updateHud(true);
   drawRadar();
   sound.join();
+}
+
+function gainCombo(amount = 1) {
+  combo = Math.min(99, combo + amount);
+  comboTimer = COMBO_WINDOW;
+  comboCountEl.textContent = combo;
+  comboFill.style.transform = `scaleX(${comboTimer / COMBO_WINDOW})`;
+  comboMeter.classList.toggle('active', combo >= 2);
+  comboMeter.classList.remove('pop');
+  void comboMeter.offsetWidth;
+  comboMeter.classList.add('pop');
+}
+
+function resetCombo() {
+  combo = 0;
+  comboTimer = 0;
+  comboMeter.classList.remove('active', 'pop');
+  comboCountEl.textContent = '0';
+  comboFill.style.transform = 'scaleX(0)';
+}
+
+function updateCombo(dt) {
+  if (combo <= 0) return;
+  comboTimer = Math.max(0, comboTimer - dt);
+  comboFill.style.transform = `scaleX(${comboTimer / COMBO_WINDOW})`;
+  if (comboTimer <= 0) resetCombo();
 }
 
 function handleEvents(events) {
@@ -360,12 +394,14 @@ function handleEvents(events) {
     if (e.type === 'hit') {
       const self = selfPlayer();
       if (e.targetId === selfId) {
+        resetCombo();
         flashDamage(false);
-        sound.hit(1);
+        sound.hit(1, 0);
       } else if (e.attackerId === selfId) {
-        sound.hit(0.65);
+        gainCombo(1);
+        sound.hit(0.65, combo);
       } else if (self && distance(self.x, self.z, e.x, e.z) < 7) {
-        sound.hit(0.24);
+        sound.hit(0.24, 0);
       }
     } else if (e.type === 'clash') {
       const self = selfPlayer();
@@ -374,6 +410,7 @@ function handleEvents(events) {
       addBladeBreakFeed(e);
       const self = selfPlayer();
       if (e.victimId === selfId) {
+        resetCombo();
         flashDamage(true);
         sound.bladeBreak();
         showToast(
@@ -381,6 +418,7 @@ function handleEvents(events) {
           1900,
         );
       } else if (e.attackerId === selfId) {
+        gainCombo(2);
         sound.bladeBreak();
         showToast(`击落「${e.victimName}」的刀片`, 1400);
       } else if (self && distance(self.x, self.z, e.x, e.z) < 12) {
@@ -394,15 +432,17 @@ function handleEvents(events) {
     } else if (e.type === 'kill') {
       addKillFeed(e);
       if (e.victimId === selfId) {
+        resetCombo();
         flashDamage(true);
         sound.death();
         showToast(`你被「${e.killerName}」击倒`, 1800);
       } else if (e.killerId === selfId) {
-        sound.kill();
+        gainCombo(3);
+        sound.kill(combo);
         showToast('猎杀成功 · 刀势增长', 1300);
       } else {
         const self = selfPlayer();
-        if (self && distance(self.x, self.z, e.x, e.z) < 10) sound.kill();
+        if (self && distance(self.x, self.z, e.x, e.z) < 10) sound.kill(0);
       }
     } else if (e.type === 'pickup') {
       if (e.playerId === selfId) {
@@ -420,17 +460,22 @@ function handleEvents(events) {
         sound.pickup();
       }
     } else if (e.type === 'mobHit') {
-      if (e.playerId === selfId) sound.hit(0.22);
+      if (e.playerId === selfId) {
+        gainCombo(1);
+        sound.hit(0.22, combo);
+      }
     } else if (e.type === 'mobKill') {
       if (e.playerId === selfId) {
         if (e.levelGained || e.bladeGained) {
+          gainCombo(2);
           const gain = [e.levelGained ? '刃阶 +1' : '', e.bladeGained ? '刀刃 +1' : '']
             .filter(Boolean)
             .join(' / ');
           showToast(`刀魂突破 · ${gain}`, 1500);
           sound.pickup();
         } else {
-          sound.hit(0.35);
+          gainCombo(1);
+          sound.hit(0.35, combo);
         }
       }
     } else if (e.type === 'dash') {
@@ -442,6 +487,7 @@ function handleEvents(events) {
     } else if (e.type === 'matchStart') {
       endScreen.classList.add('hidden');
       endVisible = false;
+      resetCombo();
       showToast('对决开始 · 活下去', 1600);
     } else if (e.type === 'matchEnd') {
       showResult(e);
@@ -948,6 +994,7 @@ function frame(now) {
   }
 
   game.update(dt);
+  updateCombo(dt);
 
   hudAccumulator += dt;
   if (joined && hudAccumulator > 0.08) {
